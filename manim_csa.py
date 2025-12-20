@@ -17,6 +17,7 @@ from manim import (
     Dot,
     Line,
     Polygon,
+    VMobject,
     MathTex,
     Text,
     FadeIn,
@@ -30,6 +31,8 @@ from manim import (
     DOWN,
     LEFT,
     RIGHT,
+    UL,
+    UR,
     config,
 )
 import av
@@ -96,7 +99,7 @@ def _patched_open_partial_movie_stream(self, file_path=None):
 scene_file_writer.SceneFileWriter.open_partial_movie_stream = _patched_open_partial_movie_stream
 
 
-def generate_scores(n1: int = 40, n2: int = 24, seed: int = 7) -> tuple[np.ndarray, np.ndarray]:
+def generate_scores(n1: int = 28, n2: int = 16, seed: int = 7) -> tuple[np.ndarray, np.ndarray]:
     """Return synthetic 2D scores for the two calibration splits."""
     rng = np.random.default_rng(seed)
     base = rng.multivariate_normal(
@@ -114,7 +117,13 @@ def sample_directions(k: int = 2, m: int = 6, seed: int = 11) -> np.ndarray:
     vecs = np.abs(rng.normal(size=(m, k)))
     norms = np.linalg.norm(vecs, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
-    return vecs / norms
+    vecs = vecs / norms
+    # Force u_1 to be the y-axis and u_5 to be the x-axis.
+    if m >= 1:
+        vecs[0] = np.array([0.0, 1.0])
+    if m >= 5:
+        vecs[4] = np.array([1.0, 0.0])
+    return vecs
 
 
 def clip_polygon_with_halfplane(poly: list[np.ndarray], u: np.ndarray, q: float) -> list[np.ndarray]:
@@ -206,50 +215,115 @@ def polygon_mobject(plane: NumberPlane, vertices: list[np.ndarray], **kwargs) ->
 class CSASection31(Scene):
     """Visual walkthrough of CSA Section 3.1 using Appendix A cues."""
 
+    def projection_marks(
+        self, points: np.ndarray, direction: np.ndarray, plane: NumberPlane, color: str
+    ) -> VGroup:
+        projections = points @ direction
+        return VGroup(
+            *[
+                Dot(
+                    plane.coords_to_point(*(direction * p)),
+                    color=color,
+                    radius=0.04,
+                    fill_opacity=0.9,
+                )
+                for p in projections
+            ]
+        )
+
+    def projection_anim(
+        self, points: np.ndarray, direction: np.ndarray, plane: NumberPlane, color: str
+    ) -> tuple[VGroup, VGroup]:
+        """Return projection targets and animating lines for moving dots onto a direction."""
+        target_points = VGroup()
+        lines = VGroup()
+        for x, y in points:
+            proj_len = np.dot(np.array([x, y]), direction)
+            proj_xy = direction * proj_len
+            target = Dot(plane.coords_to_point(*proj_xy), color="#4f9dff", radius=0.04)
+            line = Line(
+                plane.coords_to_point(x, y),
+                plane.coords_to_point(*proj_xy),
+                color=color,
+                stroke_width=2,
+                stroke_opacity=0.6,
+            )
+            target_points.add(target)
+            lines.add(line)
+        return target_points, lines
+
+    def boundary_line(self, direction: np.ndarray, q: float, plane: NumberPlane, color: str) -> Line:
+        x_int = np.array([q / max(direction[0], 1e-6), 0.0])
+        y_int = np.array([0.0, q / max(direction[1], 1e-6)])
+        return Line(
+            plane.coords_to_point(*x_int),
+            plane.coords_to_point(*y_int),
+            color=color,
+            stroke_width=3,
+            stroke_opacity=0.8,
+        )
+
     def construct(self):
         alpha = 0.05
+        beta_text_color = "#6c6cff"
+        title = Text("CSA: multivariate score quantile", font_size=44)
+        subtitle = Text("Predictors → split conformal → envelope", font_size=26)
+        subtitle.next_to(title, DOWN, buff=0.25)
+        self.play(FadeIn(title, shift=0.2 * DOWN))
+        self.play(FadeIn(subtitle, shift=0.1 * DOWN))
+        self.wait(0.6)
+        self.play(FadeOut(title), FadeOut(subtitle))
+
         plane = NumberPlane(
             x_range=[0, 4.5, 1],
             y_range=[0, 4.5, 1],
             background_line_style={"stroke_opacity": 0.25, "stroke_width": 1},
+            axis_config={
+                "color": COLOR_S1,
+            },
+            y_axis_config={
+                "color": COLOR_S2,
+            },
         )
+        plane.set_width(config.frame_width * 4.8)
+        plane.set_height(config.frame_height * 0.8)
+        plane.shift(0.1 * DOWN)
         plane.add_coordinates()
         self.play(Create(plane))
 
-        title = Text("CSA: Multivariate Score Quantile", font_size=44)
-        subtitle = Text("Section 3.1 · α = 0.05", font_size=28)
-        subtitle.next_to(title, DOWN, buff=0.25)
-        self.play(FadeIn(title, shift=0.2 * DOWN))
-        self.play(FadeIn(subtitle, shift=0.1 * DOWN))
-        self.wait(0.8)
-        self.play(FadeOut(title), FadeOut(subtitle))
-
         s1, s2 = generate_scores()
-        directions = sample_directions(m=6)
+        directions = sample_directions(m=5)
+
+        predictor_1 = MathTex(
+            r"C_1(x)=\{y: s_1(x,y)\le q_1\}", font_size=30, color=COLOR_S1
+        )
+        predictor_2 = MathTex(
+            r"C_2(x)=\{y: s_2(x,y)\le q_2\}", font_size=30, color=COLOR_S2
+        )
+        predictors = VGroup(predictor_1, predictor_2).arrange(RIGHT, buff=1.4).to_edge(UP, buff=0.25)
+        split_note = Text("Split conformal per predictor", font_size=26).next_to(
+            predictors, DOWN, buff=0.2
+        )
+        self.play(Write(predictors))
+        self.play(FadeIn(split_note))
 
         points_s1 = VGroup(
-            *[Dot(plane.coords_to_point(x, y), color=COLOR_S1, radius=0.055) for x, y in s1]
+            *[Dot(plane.coords_to_point(x, y), color="#4f9dff", radius=0.055) for x, y in s1]
         )
-        points_s2 = VGroup(
-            *[Dot(plane.coords_to_point(x, y), color=COLOR_S2, radius=0.06) for x, y in s2]
+        s1_caption = MathTex(
+            r"\mathcal{S}_{C}^{(1)} \text{ scores (ordering)}", font_size=24, color=COLOR_S1
+        ).to_corner(
+            UL, buff=0.35
         )
-
-        legend_s1 = Text("S(1)_C used for ordering", font_size=24, color=COLOR_S1).to_edge(UP).shift(
-            2.6 * LEFT
-        )
-        legend_s2 = Text("S(2)_C used for threshold", font_size=24, color=COLOR_S2).next_to(
-            legend_s1, RIGHT, buff=0.8
-        )
-        self.play(FadeIn(points_s1, lag_ratio=0.05), FadeIn(points_s2, lag_ratio=0.05))
-        self.play(FadeIn(legend_s1), FadeIn(legend_s2))
-
-        split_note = Text("Split calibration scores", font_size=26).next_to(plane, DOWN, buff=0.5)
-        self.play(Write(split_note))
-        self.wait(0.6)
+        for dot in points_s1:
+            self.play(FadeIn(dot, scale=0.5), run_time=0.08)
+        self.play(FadeIn(s1_caption))
+        self.wait(0.2)
+        self.play(FadeOut(predictors), FadeOut(split_note), run_time=0.4)
 
         rays = VGroup()
         ray_labels = VGroup()
-        ray_len = 3.8
+        ray_len = 3.6
         for idx, u in enumerate(directions):
             ray = Line(
                 plane.coords_to_point(0, 0),
@@ -258,132 +332,130 @@ class CSASection31(Scene):
                 color="#8888ff",
             )
             rays.add(ray)
-            angle_text = Text(f"u{idx+1}", font_size=20).next_to(ray.get_end(), RIGHT * 0.4 + UP * 0.1)
-            ray_labels.add(angle_text)
-        self.play(*[Create(r) for r in rays], *[Write(lbl) for lbl in ray_labels], run_time=1.5)
-
-        projection_caption = Text("Project S(1)_C onto each direction", font_size=24).next_to(
-            plane, LEFT, buff=0.7
-        )
-        self.play(Write(projection_caption))
-        self.wait(0.5)
-
-        snapshots, quantiles_final = beta_search(s1, directions, alpha=alpha)
-
-        beta_text = MathTex(r"\beta \text{ search}", font_size=30).to_edge(RIGHT).shift(0.7 * UP)
-        cov_text = MathTex(r"\text{coverage} \approx 1-\alpha", font_size=28).next_to(
-            beta_text, DOWN, buff=0.3
-        )
-        self.play(FadeIn(beta_text), FadeIn(cov_text))
-
-        envelope_poly = None
-        coverage_tracker = None
-        for step_idx, snapshot in enumerate(snapshots[:4]):  # show a few search iterations
-            beta_val = snapshot["beta"]
-            quantiles = snapshot["quantiles"]
-            cov = snapshot["coverage"]
-            verts = envelope_polygon(directions, quantiles)
-            poly = polygon_mobject(
-                plane,
-                verts,
-                color=COLOR_POLY,
-                stroke_width=4,
-                fill_opacity=0.1 + 0.08 * step_idx,
+            lbl = MathTex(rf"u_{{{idx+1}}}", font_size=20).next_to(
+                ray.get_end(), RIGHT * 0.4 + UP * 0.1
             )
-            beta_label = MathTex(
-                rf"\beta = {beta_val:.3f}", font_size=28, color=COLOR_POLY
-            ).next_to(beta_text, DOWN, buff=0.8)
-            cov_label = MathTex(
-                rf"\text{{cov}} = {cov:.2f}", font_size=28, color=COLOR_POLY
-            ).next_to(beta_label, DOWN, buff=0.2)
-            if envelope_poly is None:
-                self.play(FadeIn(poly), FadeIn(beta_label), FadeIn(cov_label))
-            else:
-                self.play(
-                    ReplacementTransform(envelope_poly, poly),
-                    Transform(coverage_tracker, cov_label),
-                    Transform(beta_tracker, beta_label),
+            ray_labels.add(lbl)
+        self.play(*[Create(r) for r in rays], *[Write(lbl) for lbl in ray_labels], run_time=1.4)
+
+        snapshots, quantiles = beta_search(s1, directions, alpha=alpha, tol=0.003, max_iter=14)
+        beta_star = snapshots[-1]["beta"] if snapshots else alpha / len(directions)
+
+        boundary_lines = VGroup()
+        thresh_labels = VGroup()
+        quantile_dots = VGroup()
+        quantile_points = []
+        for idx, u in enumerate(directions):
+            highlighted = rays[idx].copy().set_color(COLOR_POLY).set_stroke(width=4)
+            self.play(Transform(rays[idx], highlighted), run_time=0.35)
+
+            proj_targets, proj_lines = self.projection_anim(s1, u, plane, color=COLOR_S1)
+            proj_group = VGroup(proj_lines, proj_targets)
+            self.play(Create(proj_lines), run_time=0.5)
+            self.play(
+                *[Transform(points_s1[i], proj_targets[i]) for i in range(len(points_s1))],
+                run_time=0.7,
+            )
+
+            q_dir = quantiles[idx]
+            q_line = self.boundary_line(u, q_dir, plane, color=COLOR_POLY)
+            q_point = u * q_dir
+            q_dot = Dot(plane.coords_to_point(*q_point), color=COLOR_POLY, radius=0.08)
+            self.play(Create(q_line), FadeIn(q_dot), run_time=0.5)
+            boundary_lines.add(q_line)
+            quantile_dots.add(q_dot)
+            quantile_points.append(q_point)
+
+            self.play(FadeOut(proj_group, run_time=0.4))
+            self.wait(0.1)
+
+        contour_poly = None
+        order = [0, 2, 1, 3, 4]  # u1 -> u3 -> u2 -> u4 -> u5 (clockwise)
+        if len(quantile_points) >= 2:
+            ordered_pts = [quantile_points[i] for i in order if i < len(quantile_points)]
+            if len(ordered_pts) >= 2:
+                contour_poly = VMobject(color=COLOR_FINAL, stroke_width=3)
+                contour_poly.set_points_as_corners(
+                    [plane.coords_to_point(x, y) for x, y in ordered_pts]
                 )
-            envelope_poly = poly
-            beta_tracker = beta_label
-            coverage_tracker = cov_label
-            self.wait(0.5)
+                self.play(Create(contour_poly))
+                self.wait(0.2)
 
-        if envelope_poly is None:
-            return
+        # Step 8: expand/shrink the contour to illustrate search toward 1-α coverage.
+        origin = plane.coords_to_point(0, 0)
+        inflate_poly = None
+        if contour_poly:
+            inflate_poly = contour_poly.copy().scale(1.1, about_point=origin)
+            self.play(ReplacementTransform(contour_poly, inflate_poly), run_time=0.6)
+        else:
+            fallback_vertices = envelope_polygon(directions, quantiles)
+            inflate_poly = polygon_mobject(
+                plane, fallback_vertices, color=COLOR_POLY, stroke_width=3, fill_opacity=0.08
+            ).scale(1.1, about_point=origin)
+            self.play(Create(inflate_poly), run_time=0.6)
 
-        frontier_caption = Text("Quantile envelope A₁ defines ordering", font_size=24).next_to(
-            plane, RIGHT, buff=0.7
+        # Introduce S(2)_C and final adjustment.
+        points_s2 = VGroup(
+            *[Dot(plane.coords_to_point(x, y), color=COLOR_S2, radius=0.06) for x, y in s2]
         )
-        self.play(Write(frontier_caption))
-        self.wait(0.6)
-
-        # Illustrate t(s) mapping for a held-out score.
-        sample_point = s2[0]
-        sample_dot = Dot(plane.coords_to_point(*sample_point), color=COLOR_S2, radius=0.08)
-        self.play(FadeIn(sample_dot))
-
-        # Identify the direction causing the largest ratio.
-        ratios = (sample_point @ directions.T) / quantiles
-        worst_idx = int(np.argmax(ratios))
-        worst_u = directions[worst_idx]
-        worst_ratio = ratios[worst_idx]
-        boundary_point = (worst_u * quantiles[worst_idx]) / (worst_u @ worst_u)
-        boundary_line = Line(
-            plane.coords_to_point(*(sample_point)),
-            plane.coords_to_point(*boundary_point),
-            color=COLOR_S2,
-            stroke_width=3,
+        s2_caption = MathTex(
+            r"\mathcal{S}_{C}^{(2)} \text{ scores (adjustment)}", font_size=24, color=COLOR_S2
+        ).next_to(
+            s1_caption, DOWN, buff=0.2
         )
-        t_text = MathTex(
-            rf"t(s) = {worst_ratio:.2f}", font_size=30, color=COLOR_S2
-        ).next_to(sample_dot, RIGHT, buff=0.3)
-        self.play(Create(boundary_line), Write(t_text))
-        self.wait(0.6)
+        self.play(FadeIn(points_s2, lag_ratio=0.05), FadeIn(s2_caption), run_time=1.0)
+        self.wait(0.2)
 
-        # Final adjustment using S(2)_C to obtain b_t and the final envelope.
-        t_values = np.max((s2 @ directions.T) / quantiles_final, axis=1)
+        t_values = np.max((s2 @ directions.T) / quantiles, axis=1)
         bt = float(np.quantile(t_values, 1 - alpha))
-        final_quantiles = quantiles_final * bt
-        final_vertices = envelope_polygon(directions, final_quantiles)
-        final_poly = polygon_mobject(
-            plane, final_vertices, color=COLOR_FINAL, stroke_width=4, fill_opacity=0.15
+        final_quantiles = quantiles * bt
+        final_poly = (
+            inflate_poly.copy()
+            .scale(bt, about_point=origin)
+            .set_stroke(width=4, color=COLOR_FINAL)
+            .set_fill(opacity=0.18)
+            if inflate_poly
+            else polygon_mobject(
+                plane,
+                envelope_polygon(directions, final_quantiles),
+                color=COLOR_FINAL,
+                stroke_width=4,
+                fill_opacity=0.18,
+            )
         )
+
+        bt_text = MathTex(rf"\hat{{t}}={bt:.2f}", font_size=28, color=COLOR_FINAL)
+        self.play(ReplacementTransform(inflate_poly, final_poly), FadeIn(bt_text))
+        self.wait(0.6)
+
         final_label = MathTex(
             r"\hat{Q} = \bigcap_m H(u_m, \hat{t}\tilde{q}_m)", font_size=30, color=COLOR_FINAL
-        ).to_edge(DOWN)
-        bt_text = MathTex(rf"\hat{{t}} = {bt:.2f}", font_size=28, color=COLOR_FINAL).next_to(
-            final_label, UP, buff=0.2
-        )
-
-        self.play(ReplacementTransform(envelope_poly, final_poly), FadeIn(bt_text))
-        self.play(Write(final_label))
-        self.wait(0.8)
-
-        outro = Text("CSA multivariate quantile region with α = 0.05", font_size=26).next_to(
-            plane, DOWN, buff=0.8
-        )
-        self.play(FadeIn(outro, shift=0.2 * UP))
-        self.wait(1.2)
+        ).to_corner(UR, buff=0.6)
+        coverage_label = MathTex(
+            r"|S^{(2)}_C \cap \hat{Q}| \approx 1-\alpha", font_size=26, color=COLOR_FINAL
+        ).next_to(final_label, DOWN, buff=0.2)
+        self.play(Write(final_label), Write(coverage_label))
+        self.wait(1.0)
 
         self.play(
             FadeOut(points_s1),
             FadeOut(points_s2),
             FadeOut(final_poly),
-            FadeOut(outro),
-            FadeOut(beta_text),
-            FadeOut(cov_text),
-            FadeOut(beta_tracker),
-            FadeOut(coverage_tracker),
-            FadeOut(frontier_caption),
-            FadeOut(projection_caption),
-            FadeOut(split_note),
+            FadeOut(thresh_labels),
+            FadeOut(quantile_dots),
+            FadeOut(contour_poly) if contour_poly else FadeOut(VGroup()),
             FadeOut(ray_labels),
             FadeOut(rays),
-            FadeOut(plane),
-            FadeOut(sample_dot),
-            FadeOut(boundary_line),
-            FadeOut(t_text),
-            FadeOut(final_label),
+            FadeOut(boundary_lines),
+            FadeOut(s1_caption),
+            FadeOut(s2_caption),
+            FadeOut(split_note),
+            FadeOut(predictor_1),
+            FadeOut(predictor_2),
             FadeOut(bt_text),
+            FadeOut(final_label),
+            FadeOut(coverage_label),
+            FadeOut(plane),
         )
+        # Ensure a clean ending frame with nothing lingering.
+        self.play(FadeOut(VGroup(*self.mobjects)), run_time=0.5)
