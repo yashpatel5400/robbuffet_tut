@@ -381,6 +381,20 @@ class CSASection31(Scene):
                 self.play(Create(contour_poly))
                 self.wait(0.2)
 
+        # Introduce S(2)_C and mark the current contour before expansion.
+        points_s2 = VGroup(
+            *[Dot(plane.coords_to_point(x, y), color=COLOR_S2, radius=0.06) for x, y in s2]
+        )
+        s2_caption = MathTex(
+            r"\mathcal{S}_{C}^{(2)} \text{ scores (adjustment)}", font_size=24, color=COLOR_S2
+        ).next_to(s1_caption, DOWN, buff=0.2)
+        q_label_anchor = contour_poly if contour_poly else plane
+        q_label = MathTex(r"\hat{Q}", font_size=28, color=COLOR_FINAL).next_to(
+            q_label_anchor, RIGHT, buff=0.3
+        )
+        self.play(FadeIn(points_s2, lag_ratio=0.05), FadeIn(s2_caption), FadeIn(q_label), run_time=1.0)
+        self.wait(0.2)
+
         # Step 8: expand/shrink the contour to illustrate search toward 1-α coverage.
         origin = plane.coords_to_point(0, 0)
         inflate_poly = None
@@ -395,17 +409,6 @@ class CSASection31(Scene):
             self.play(Create(inflate_poly), run_time=0.6)
 
         # Introduce S(2)_C and final adjustment.
-        points_s2 = VGroup(
-            *[Dot(plane.coords_to_point(x, y), color=COLOR_S2, radius=0.06) for x, y in s2]
-        )
-        s2_caption = MathTex(
-            r"\mathcal{S}_{C}^{(2)} \text{ scores (adjustment)}", font_size=24, color=COLOR_S2
-        ).next_to(
-            s1_caption, DOWN, buff=0.2
-        )
-        self.play(FadeIn(points_s2, lag_ratio=0.05), FadeIn(s2_caption), run_time=1.0)
-        self.wait(0.2)
-
         t_values = np.max((s2 @ directions.T) / quantiles, axis=1)
         bt = float(np.quantile(t_values, 1 - alpha))
         final_quantiles = quantiles * bt
@@ -457,5 +460,3 @@ class CSASection31(Scene):
             FadeOut(coverage_label),
             FadeOut(plane),
         )
-        # Ensure a clean ending frame with nothing lingering.
-        self.play(FadeOut(VGroup(*self.mobjects)), run_time=0.5)
