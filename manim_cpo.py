@@ -301,16 +301,11 @@ class CPOSections(Scene):
         # Choose the candidate with largest projection along grad_dir.
         projections = [np.dot(plane.point_to_coords(dot.get_center())[:2], grad_dir2) for dot in candidates]
         worst_idx = int(np.argmax(projections))
-        worst_dot = candidates[worst_idx]
-        worst_label = MathTex(r"c^*", font_size=28, color="#ffd166").next_to(worst_dot, RIGHT)
-        fade_rest = [FadeOut(m) for i, m in enumerate(candidates) if i != worst_idx]
-        fade_rest += [FadeOut(m) for i, m in enumerate(ck_labels) if i != worst_idx]
-        self.play(
-            worst_dot.animate.scale(1.2).set_color("#ffd166"),
-            FadeIn(worst_label),
-            *fade_rest,
-            run_time=0.6,
-        )
+        worst_point = candidates[worst_idx]
+        fade_all = [FadeOut(m) for m in candidates + ck_labels]
+        c_star_dot = Dot(worst_point.get_center(), color="#ffd166", radius=0.08)
+        c_star_label = MathTex(r"c^*", font_size=28, color="#ffd166").next_to(c_star_dot, RIGHT)
+        self.play(*fade_all, FadeIn(c_star_dot), FadeIn(c_star_label), run_time=0.8)
 
         # Small gradient arrow near w^{(0)} and projected step text.
         grad_arrow = Arrow(
@@ -338,7 +333,8 @@ class CPOSections(Scene):
         d_label = w1_label
 
         # Remove c* candidate visuals after the first step.
-        self.play(*[FadeOut(m) for m in candidates + ck_labels], FadeOut(worst_label), run_time=0.4)
+        self.play(FadeOut(c_star_dot), FadeOut(c_star_label), run_time=0.4)
+        self.remove(c_star_dot, c_star_label)
 
         # Clear equations before iterative updates.
         fades = [FadeOut(phi_def), FadeOut(grad_def), FadeOut(inner_eq), FadeOut(inner_highlight), FadeOut(update_eq), FadeOut(grad_arrow)]
